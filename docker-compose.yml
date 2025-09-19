@@ -1,0 +1,67 @@
+volumes:
+  minio:
+services:
+  s3cure:
+    build: .
+    restart: unless-stopped
+    environment:
+      S3EON_MASTER_KEY: ${S3EON_MASTER_KEY:-wi3bjhsn53jgan73evaddr4neq7axq4gf9iut2pwj7hzyabovpbsij5q34pu7qym}
+      S3EON_PORT: ${S3EON_PORT:-8080}
+      S3EON_DOWNSTREAM_ACCESS_KEY_ID: ${S3EON_DOWNSTREAM_ACCESS_KEY_ID:-user}
+      S3EON_DOWNSTREAM_SECRET_ACCESS_KEY: ${S3EON_DOWNSTREAM_SECRET_ACCESS_KEY:-password}
+      S3EON_DOWNSTREAM_URL_STYLE: ${S3EON_DOWNSTREAM_URL_STYLE:-0}
+      S3EON_UPSTREAM_ACCESS_KEY_ID: ${S3EON_UPSTREAM_ACCESS_KEY_ID:-admin}
+      S3EON_UPSTREAM_SECRET_ACCESS_KEY: ${S3EON_UPSTREAM_SECRET_ACCESS_KEY:-dkp5dx4vgh9jv92n}
+      S3EON_UPSTREAM_ENDPOINT: ${S3EON_UPSTREAM_ENDPOINT:-https://minio:9000}
+      S3EON_UPSTREAM_REGION: ${S3EON_UPSTREAM_REGION:-us-east-1}
+      S3EON_UPSTREAM_CA_FILE: ${S3EON_UPSTREAM_CA_FILE:-/app/certs/public.crt}
+      S3EON_UPSTREAM_URL_STYLE: ${S3EON_UPSTREAM_URL_STYLE:-0}
+    volumes:
+      - ./.certs:/app/certs
+    ports:
+      - "8080:8080"
+      - "8081:8081"
+  
+  browser:
+    image: cloudlena/s3manager
+    restart: unless-stopped
+    network_mode: "service:s3cure"
+    environment:
+      ENDPOINT: localhost:8080
+      REGION: us-east-1
+      ACCESS_KEY_ID: user
+      SECRET_ACCESS_KEY: password
+      USE_SSL: false
+      PORT: 8081
+  
+  minio: 
+    image: minio/minio:latest 
+    restart: unless-stopped
+    ports: 
+      - "9000:9000" # S3 API 
+      - "9001:9001" # Console UI 
+    environment: 
+      MINIO_ROOT_USER: admin 
+      MINIO_ROOT_PASSWORD: dkp5dx4vgh9jv92n   
+    command: server /data --console-address ":9001" 
+    volumes: 
+      - minio:/data 
+      - ./.certs:/root/.minio/certs
+
+  minio-bucket:
+    image: minio/mc:latest
+    network_mode: "service:minio"
+    environment:
+      MC_INSECURE: "true"
+    entrypoint:
+      - /bin/sh 
+      - -c
+    command:
+      - |
+          until mc alias set local https://localhost:9000 admin dkp5dx4vgh9jv92n; do
+            echo 'Waiting for MinIO...'
+            sleep 2
+          done
+          mc mb local/my-bucket || true
+
+
