@@ -1,4 +1,6 @@
 *
 !*.go 
+!internal/s3proxy/*.go
+!internal/s3proxy/*.rego
 !go.mod
 !go.sum

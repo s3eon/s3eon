@@ -77,13 +77,11 @@ func NewS3Proxy(opts ...S3ProxyOptFunc) (s *S3Proxy, err error) {
 	}
 
 	s.proxy = newCancellableProxy(httputil.ReverseProxy{
-		Transport: &cancellableTransport{
-			transport: &http.Transport{
-				TLSClientConfig: &tls.Config{
-					RootCAs: s.proxyCA,
-				},
+		Transport: newCancellableTransport(&http.Transport{
+			TLSClientConfig: &tls.Config{
+				RootCAs: s.proxyCA,
 			},
-		},
+		}),
 	}, s.rewrite)
 	return
 }
@@ -472,10 +470,6 @@ func (s *S3Proxy) createSSECKey(endpoint, bucket, key string) (keyB64 string, ke
 }
 
 func parseS3CopySource(copySource string) (bucket string, key string, err error) {
-	if copySource == "" {
-		return "", "", fmt.Errorf("X-Amz-Copy-Source is empty")
-	}
-
 	// URL-decode
 	decoded, err := url.PathUnescape(copySource)
 	if err != nil {

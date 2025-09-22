@@ -1,9 +1,12 @@
 volumes:
   minio:
 services:
-  s3cure:
+  s3eon:
     build: .
     restart: unless-stopped
+    depends_on: 
+      certificate:
+        condition: service_completed_successfully
     environment:
       S3EON_MASTER_KEY: ${S3EON_MASTER_KEY:-wi3bjhsn53jgan73evaddr4neq7axq4gf9iut2pwj7hzyabovpbsij5q34pu7qym}
       S3EON_PORT: ${S3EON_PORT:-8080}
@@ -12,37 +15,40 @@ services:
       S3EON_DOWNSTREAM_URL_STYLE: ${S3EON_DOWNSTREAM_URL_STYLE:-0}
       S3EON_UPSTREAM_ACCESS_KEY_ID: ${S3EON_UPSTREAM_ACCESS_KEY_ID:-admin}
       S3EON_UPSTREAM_SECRET_ACCESS_KEY: ${S3EON_UPSTREAM_SECRET_ACCESS_KEY:-dkp5dx4vgh9jv92n}
-      S3EON_UPSTREAM_ENDPOINT: ${S3EON_UPSTREAM_ENDPOINT:-https://minio:9000}
+      S3EON_UPSTREAM_ENDPOINT: ${S3EON_UPSTREAM_ENDPOINT:-https://localhost:9000}
       S3EON_UPSTREAM_REGION: ${S3EON_UPSTREAM_REGION:-us-east-1}
-      S3EON_UPSTREAM_CA_FILE: ${S3EON_UPSTREAM_CA_FILE:-/app/certs/public.crt}
+      S3EON_UPSTREAM_CA_FILE: ${S3EON_UPSTREAM_CA_FILE:-/app/certs/CAs/ca.crt}
       S3EON_UPSTREAM_URL_STYLE: ${S3EON_UPSTREAM_URL_STYLE:-0}
     volumes:
       - ./.certs:/app/certs
     ports:
-      - "8080:8080"
-      - "8081:8081"
+      - "8080:8080" # S3eon
+      - "8081:8081" # S3manager
+      - "9000:9000" # minio S3 API 
+      - "9001:9001" # minio Console UI 
   
   browser:
     image: cloudlena/s3manager
     restart: unless-stopped
-    network_mode: "service:s3cure"
+    network_mode: "service:s3eon"
     environment:
       ENDPOINT: localhost:8080
       REGION: us-east-1
-      ACCESS_KEY_ID: user
-      SECRET_ACCESS_KEY: password
+      ACCESS_KEY_ID: ${S3EON_DOWNSTREAM_ACCESS_KEY_ID:-user}
+      SECRET_ACCESS_KEY: ${S3EON_DOWNSTREAM_SECRET_ACCESS_KEY:-password}
       USE_SSL: false
       PORT: 8081
   
   minio: 
     image: minio/minio:latest 
+    network_mode: "service:s3eon"
+    depends_on: 
+      certificate:
+        condition: service_completed_successfully
     restart: unless-stopped
-    ports: 
-      - "9000:9000" # S3 API 
-      - "9001:9001" # Console UI 
     environment: 
-      MINIO_ROOT_USER: admin 
-      MINIO_ROOT_PASSWORD: dkp5dx4vgh9jv92n   
+      MINIO_ROOT_USER: ${S3EON_UPSTREAM_ACCESS_KEY_ID:-admin}
+      MINIO_ROOT_PASSWORD: ${S3EON_UPSTREAM_SECRET_ACCESS_KEY:-dkp5dx4vgh9jv92n}
     command: server /data --console-address ":9001" 
     volumes: 
       - minio:/data 
@@ -50,18 +56,34 @@ services:
 
   minio-bucket:
     image: minio/mc:latest
-    network_mode: "service:minio"
+    network_mode: "service:s3eon"
     environment:
+      MINIO_ROOT_USER: ${S3EON_UPSTREAM_ACCESS_KEY_ID:-admin}
+      MINIO_ROOT_PASSWORD: ${S3EON_UPSTREAM_SECRET_ACCESS_KEY:-dkp5dx4vgh9jv92n}
       MC_INSECURE: "true"
     entrypoint:
       - /bin/sh 
       - -c
     command:
       - |
-          until mc alias set local https://localhost:9000 admin dkp5dx4vgh9jv92n; do
+          until mc alias set local https://localhost:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD; do
             echo 'Waiting for MinIO...'
             sleep 2
           done
           mc mb local/my-bucket || true
 
 
+  certificate:
+    image: alpine/mkcert
+    restart: on-failure
+    volumes: 
+      - ./.certs:/certs
+    working_dir: /certs
+    entrypoint: [/bin/sh, -c]
+    command: 
+      - |
+        if [ ! -f 'public.crt' ] || [ ! -f 'private.key' ]; then
+          mkcert -key-file private.key -cert-file public.crt localhost
+          mkdir -p CAs
+          cp $$(mkcert -CAROOT)/rootCA.pem CAs/ca.crt
+        fi

@@ -1,6 +1,6 @@
 module github.com/s3eon/s3eon
 
-go 1.24.2
+go 1.25.1
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.38.3
