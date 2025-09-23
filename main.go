@@ -13,6 +13,7 @@ import (
 
 var (
 	masterKey string
+	host      string
 	port      string
 
 	downstreamID       string
@@ -29,6 +30,7 @@ var (
 
 func init() {
 	flag.StringVar(&masterKey, "master-key", getEnvOrDefault("S3EON_MASTER_KEY", ""), "Master key for deriving per-object SSE-C keys")
+	flag.StringVar(&host, "host", getEnvOrDefault("S3EON_HOST", ""), "Host to listen on")
 	flag.StringVar(&port, "port", getEnvOrDefault("S3EON_PORT", "8080"), "Port to listen on")
 
 	flag.StringVar(&downstreamID, "downstream-access-key-id", getEnvOrDefault("S3EON_DOWNSTREAM_ACCESS_KEY_ID", ""), "Downstream S3 access key ID")
@@ -96,7 +98,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	addr := fmt.Sprintf(":%s", port)
+	addr := fmt.Sprintf("%s:%s", host, port)
 	slog.Default().Info("Starting S3", "addr", addr)
 	if err := s3Proxy.ListenAndServe(addr); err != nil {
 		slog.Default().Error("Failed to start server", "error", err)
