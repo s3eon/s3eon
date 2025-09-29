@@ -25,7 +25,7 @@ func TestInterpolate(t *testing.T) {
 	t.Setenv("PORT", "8080")
 	t.Setenv("USER", "root")
 	t.Setenv("VALID", "true")
-	t.Setenv("FILENAME", "test2")
+	t.Setenv("FILENAME", "test")
 	t.Setenv("AMOUNT", "1000.1")
 	yamlData := `
 user: ${env://USER}
@@ -33,8 +33,8 @@ port: ${env://PORT}
 number: 0
 amount: ${env://AMOUNT}
 debug: ${env://VALID}
-secret: ${file://./testdata/test.txt} ${file://./testdata/${env://FILENAME}.txt} test3
-escaped: $${$$hello $$$${ENV://USER}}
+secret: ${file://./testdata/${env://FILENAME}.txt} ${file://./testdata/test{}.txt} test3
+escaped: $${$$hello $$$${env://USER}}
 `
 
 	var cfg MyConfig
@@ -47,7 +47,7 @@ escaped: $${$$hello $$$${ENV://USER}}
 		Debug:   Interpolated[bool]{Value: true},
 		Amount:  Interpolated[MyFloat64]{Value: 1000.1},
 		Secret:  Interpolated[*MyString]{Value: pointer(MyString("test test2 test3"))},
-		Escaped: Interpolated[string]{Value: "${$$hello $$${ENV://USER}}"},
+		Escaped: Interpolated[string]{Value: "${$$hello $$${env://USER}}"},
 	}
 	assert.Equal(t, want, cfg)
 }
