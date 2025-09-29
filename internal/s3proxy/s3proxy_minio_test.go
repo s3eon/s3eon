@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-package s3proxy
+package s3proxy_test
 
 import (
 	"bytes"
@@ -20,13 +20,14 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/google/uuid"
+	"github.com/s3eon/s3eon/internal/s3proxy"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/exec"
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
-func newMinioProxy(t *testing.T) (rp *S3Proxy, s *httptest.Server, bucket string) {
+func newMinioProxy(t *testing.T) (s *httptest.Server, cred aws.Credentials, bucket string) {
 	// define upstream data
 	accessKey := uuid.New().String()
 	secretKey := uuid.New().String()
@@ -38,22 +39,23 @@ func newMinioProxy(t *testing.T) (rp *S3Proxy, s *httptest.Server, bucket string
 	t.Cleanup(func() { container.Terminate(t.Context()) })
 
 	// create proxy
-	rp, err = NewS3Proxy(
-		WithSSECMasterKey("Da3ei2WFuf3tR5JXHJzSsqbpdmbYk3XkbKTFu$jcVW@ap@H5m^7Db^bq@ePMCA5x"),
-		WithAdditionalCACert(certFile),
-		WithDownstream(UrlStylePath),
-		WithUpstream(minioEndpoint, "us-east-1", UrlStylePath),
-		WithCredentialMap(
-			aws.Credentials{
-				AccessKeyID:     uuid.New().String(),
-				SecretAccessKey: uuid.New().String(),
-			},
+	cred = aws.Credentials{
+		AccessKeyID:     uuid.New().String(),
+		SecretAccessKey: uuid.New().String(),
+	}
+	rp, err := s3proxy.NewS3Proxy(
+		s3proxy.WithSSECMasterKey("Da3ei2WFuf3tR5JXHJzSsqbpdmbYk3XkbKTFu$jcVW@ap@H5m^7Db^bq@ePMCA5x"),
+		s3proxy.WithAdditionalCACert(certFile),
+		s3proxy.WithDownstream(s3proxy.UrlStylePath),
+		s3proxy.WithUpstream(minioEndpoint, "us-east-1", s3proxy.UrlStylePath),
+		s3proxy.WithCredentialMap(
+			cred,
 			aws.Credentials{
 				AccessKeyID:     accessKey,
 				SecretAccessKey: secretKey,
 			},
 		),
-		WithCredentialMap(
+		s3proxy.WithCredentialMap(
 			aws.Credentials{
 				AccessKeyID:     uuid.New().String(),
 				SecretAccessKey: uuid.New().String(),

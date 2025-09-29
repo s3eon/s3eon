@@ -1,4 +1,4 @@
-package s3proxy
+package s3proxy_test
 
 import (
 	"bytes"
@@ -26,7 +26,7 @@ import (
 func TestS3Proxy(t *testing.T) {
 	testdata := []struct {
 		Scenario string
-		Factory  func(t *testing.T) (rp *S3Proxy, s *httptest.Server, bucket string)
+		Factory  func(t *testing.T) (s *httptest.Server, cred aws.Credentials, bucket string)
 	}{
 		{"Minio", newMinioProxy},
 		{"AWS", newAWSProxy},
@@ -34,14 +34,8 @@ func TestS3Proxy(t *testing.T) {
 
 	for _, tt := range testdata {
 		t.Run(tt.Scenario, func(t *testing.T) {
-			proxy, s, bucket := tt.Factory(t)
+			s, cred, bucket := tt.Factory(t)
 			httpClient := s.Client()
-
-			var cred credential
-			for _, v := range proxy.credentials {
-				cred = v
-				break
-			}
 
 			// content
 			key := "hello world.txt"
@@ -55,7 +49,7 @@ func TestS3Proxy(t *testing.T) {
 					config.WithRegion("us-east-1"),
 					config.WithHTTPClient(httpClient),
 					config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
-						cred.downstream.AccessKeyID, cred.downstream.SecretAccessKey, ""),
+						cred.AccessKeyID, cred.SecretAccessKey, ""),
 					),
 				)
 				require.NoError(t, err)
@@ -174,7 +168,7 @@ func TestS3Proxy(t *testing.T) {
 				// use minio client
 				u, _ := url.Parse(s.URL)
 				minioClient, err := minio.New(u.Host, &minio.Options{
-					Creds:           mcredentials.NewStaticV4(cred.downstream.AccessKeyID, cred.downstream.SecretAccessKey, ""),
+					Creds:           mcredentials.NewStaticV4(cred.AccessKeyID, cred.SecretAccessKey, ""),
 					Transport:       httpClient.Transport,
 					TrailingHeaders: true,
 					Secure:          u.Scheme == "https",

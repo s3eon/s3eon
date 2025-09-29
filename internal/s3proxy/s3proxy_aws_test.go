@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-package s3proxy
+package s3proxy_test
 
 import (
 	"context"
@@ -11,10 +11,11 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/google/uuid"
+	"github.com/s3eon/s3eon/internal/s3proxy"
 	"github.com/stretchr/testify/require"
 )
 
-func newAWSProxy(t *testing.T) (rp *S3Proxy, s *httptest.Server, bucket string) {
+func newAWSProxy(t *testing.T) (s *httptest.Server, cred aws.Credentials, bucket string) {
 	// define upstream data
 	accessKey := os.Getenv("AWS_ACCESS_KEY_ID")
 	secretKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
@@ -45,21 +46,22 @@ func newAWSProxy(t *testing.T) (rp *S3Proxy, s *httptest.Server, bucket string) 
 	})
 
 	// create proxy
-	rp, err = NewS3Proxy(
-		WithSSECMasterKey("Da3ei2WFuf3tR5JXHJzSsqbpdmbYk3XkbKTFu$jcVW@ap@H5m^7Db^bq@ePMCA5x"),
-		WithDownstream(UrlStylePath),
-		WithUpstream("https://s3.amazonaws.com", region, UrlStyleVirtualHosted),
-		WithCredentialMap(
-			aws.Credentials{
-				AccessKeyID:     uuid.New().String(),
-				SecretAccessKey: uuid.New().String(),
-			},
+	cred = aws.Credentials{
+		AccessKeyID:     uuid.New().String(),
+		SecretAccessKey: uuid.New().String(),
+	}
+	rp, err := s3proxy.NewS3Proxy(
+		s3proxy.WithSSECMasterKey("Da3ei2WFuf3tR5JXHJzSsqbpdmbYk3XkbKTFu$jcVW@ap@H5m^7Db^bq@ePMCA5x"),
+		s3proxy.WithDownstream(s3proxy.UrlStylePath),
+		s3proxy.WithUpstream("https://s3.amazonaws.com", region, s3proxy.UrlStyleVirtualHosted),
+		s3proxy.WithCredentialMap(
+			cred,
 			aws.Credentials{
 				AccessKeyID:     accessKey,
 				SecretAccessKey: secretKey,
 			},
 		),
-		WithCredentialMap(
+		s3proxy.WithCredentialMap(
 			aws.Credentials{
 				AccessKeyID:     uuid.New().String(),
 				SecretAccessKey: uuid.New().String(),
