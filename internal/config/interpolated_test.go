@@ -33,7 +33,7 @@ port: ${env://PORT}
 number: 0
 amount: ${env://AMOUNT}
 debug: ${env://VALID}
-secret: ${file://./testdata/${env://FILENAME}.txt} ${file://./testdata/test{}.txt} test3
+secret: ${file://./testdata/${env://FILENAME}.txt} ${file://./testdata/test{.txt} ${file://./testdata/test{}}.txt} test4
 escaped: $${$$hello $$$${env://USER}}
 `
 
@@ -46,7 +46,7 @@ escaped: $${$$hello $$$${env://USER}}
 		Number:  Interpolated[int]{Value: 0},
 		Debug:   Interpolated[bool]{Value: true},
 		Amount:  Interpolated[MyFloat64]{Value: 1000.1},
-		Secret:  Interpolated[*MyString]{Value: pointer(MyString("test test2 test3"))},
+		Secret:  Interpolated[*MyString]{Value: pointer(MyString("test test2 test3 test4"))},
 		Escaped: Interpolated[string]{Value: "${$$hello $$${env://USER}}"},
 	}
 	assert.Equal(t, want, cfg)

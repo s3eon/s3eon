@@ -1,7 +1,6 @@
 package config
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"reflect"
@@ -24,11 +23,12 @@ func (r *Interpolated[T]) UnmarshalYAML(value *yaml.Node) (err error) {
 		Tag:  yamlTagForType(r.Value),
 	}
 
-	node.Value, err = interpolate(value.Value)
+	v, idx, err := interpolate(value.Value, false)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to interpolate at index %d: %w", idx, err)
 	}
 
+	node.Value = v
 	return node.Decode(&r.Value)
 }
 
@@ -58,12 +58,24 @@ func yamlTagForType(v any) string {
 	}
 }
 
-func interpolate(src string) (string, error) {
+func interpolate(src string, started bool) (_ string, idx int, err error) {
 	var output strings.Builder
 	runes := []rune(src)
 
 	for i := 0; i < len(runes); i++ {
 		r := runes[i]
+
+		if started && r == '}' {
+			// escaped }} inside ${...}
+			if i+1 < len(runes) && runes[i+1] == '}' {
+				output.WriteRune('}')
+				i++
+				continue
+			}
+
+			resolved, err := resolve(output.String())
+			return resolved, i, err
+		}
 
 		if r != '$' {
 			output.WriteRune(r)
@@ -92,58 +104,31 @@ func interpolate(src string) (string, error) {
 		// Handle ${...}
 		if next != '{' {
 			output.WriteRune('$')
-			output.WriteRune(next)
-			i++
 			continue
 		}
 
 		// Found ${...}
-		i += 2 // skip $ and {
-		start := i
-		depth := 1
-		for i < len(runes) && depth > 0 {
-			switch runes[i] {
-			case '{':
-				depth++
-			case '}':
-				depth--
-			}
-			if depth > 0 {
-				i++
-			}
-		}
-
-		if depth != 0 {
-			return "", fmt.Errorf("unterminated variable")
-		}
-
-		varName := string(runes[start:i])
-
-		// recurse
-		varName, err := interpolate(varName)
+		start := i + 2
+		var resolved string
+		resolved, idx, err = interpolate(string(runes[start:]), true)
 		if err != nil {
-			return "", err
+			return "", start + idx, err
 		}
-
-		// resolve
-		resolved, err := resolve([]byte(varName))
-		if err != nil {
-			return "", err
-		}
-
-		output.Write(resolved)
+		output.WriteString(resolved)
+		i = start + idx
 	}
 
-	return output.String(), nil
+	return output.String(), idx, nil
 }
 
-func resolve(s []byte) ([]byte, error) {
+func resolve(s string) (string, error) {
 	switch {
-	case bytes.HasPrefix(s, []byte("env://")):
-		return []byte(os.Getenv(strings.TrimPrefix(string(s), "env://"))), nil
-	case bytes.HasPrefix(s, []byte("file://")):
-		return os.ReadFile(strings.TrimPrefix(string(s), "file://"))
+	case strings.HasPrefix(s, "env://"):
+		return os.Getenv(strings.TrimPrefix(string(s), "env://")), nil
+	case strings.HasPrefix(s, "file://"):
+		b, err := os.ReadFile(strings.TrimPrefix(string(s), "file://"))
+		return string(b), err
 	default:
-		return nil, fmt.Errorf("unsupported variable type")
+		return "", fmt.Errorf("unsupported variable type")
 	}
 }
