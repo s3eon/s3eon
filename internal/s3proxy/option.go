@@ -18,26 +18,6 @@ func WithSSECMasterKey(masterKey string) S3ProxyOptFunc {
 	}
 }
 
-func WithDownstream(urlStyle S3URLStyle) S3ProxyOptFunc {
-	return func(s *S3Proxy) error {
-		s.downstreamURLStyle = urlStyle
-		return nil
-	}
-}
-
-func WithUpstream(endpoint, region string, urlStyle S3URLStyle) S3ProxyOptFunc {
-	return func(s *S3Proxy) (err error) {
-		s.upstreamEndpoint, err = url.Parse(endpoint)
-		if err != nil {
-			return
-		}
-
-		s.upstreamURLStyle = urlStyle
-		s.upstreamRegion = region
-		return nil
-	}
-}
-
 func WithAdditionalCACert(caCert string) S3ProxyOptFunc {
 	return func(s *S3Proxy) (err error) {
 		b, err := os.ReadFile(caCert)
@@ -53,9 +33,50 @@ func WithAdditionalCACert(caCert string) S3ProxyOptFunc {
 	}
 }
 
+func WithDownstream(urlStyle S3URLStyle) S3ProxyOptFunc {
+	return func(s *S3Proxy) error {
+		si, ok := s.sites["*"]
+		if !ok {
+			si = site{}
+		}
+
+		si.downstreamURLStyle = urlStyle
+		s.sites["*"] = si
+		return nil
+	}
+}
+
+func WithUpstream(endpoint, region string, urlStyle S3URLStyle) S3ProxyOptFunc {
+	return func(s *S3Proxy) (err error) {
+		si, ok := s.sites["*"]
+		if !ok {
+			si = site{}
+		}
+
+		si.upstreamEndpoint, err = url.Parse(endpoint)
+		if err != nil {
+			return
+		}
+
+		si.upstreamURLStyle = urlStyle
+		si.upstreamRegion = region
+		s.sites["*"] = si
+		return nil
+	}
+}
+
 func WithCredentialMap(downstream aws.Credentials, upstream aws.Credentials) S3ProxyOptFunc {
 	return func(s *S3Proxy) error {
-		s.credentials[downstream.AccessKeyID] = credential{downstream, upstream}
+		si, ok := s.sites["*"]
+		if !ok {
+			si = site{}
+		}
+		if si.credentials == nil {
+			si.credentials = map[string]credential{}
+		}
+
+		si.credentials[downstream.AccessKeyID] = credential{downstream, upstream}
+		s.sites["*"] = si
 		return nil
 	}
 }

@@ -2,6 +2,7 @@ package s3proxy
 
 import (
 	"context"
+	"net/url"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 )
@@ -11,8 +12,9 @@ type contextKey struct{}
 type contextValue struct {
 	context context.Context
 
-	credential credential
+	upstream   upstreamInfo
 	object     objectInfo
+	credential credential
 	action     string
 	sourceIP   string
 }
@@ -23,7 +25,13 @@ type credential struct {
 }
 
 type objectInfo struct {
-	endpoint string
+	hostname string
 	bucket   string
 	key      string
+}
+
+type upstreamInfo struct {
+	endpoint url.URL
+	style    S3URLStyle
+	region   string
 }

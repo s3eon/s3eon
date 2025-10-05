@@ -21,20 +21,25 @@ const (
 	UrlStyleVirtualHosted
 )
 
-type S3Proxy struct {
-	masterKey string
-	signer    *v4.Signer
-
+type site struct {
+	downstreamHostname string
 	downstreamURLStyle S3URLStyle
-
-	proxy   *cancelableProxy
-	proxyCA *x509.CertPool
 
 	upstreamURLStyle S3URLStyle
 	upstreamEndpoint *url.URL
 	upstreamRegion   string
 
 	credentials map[string]credential
+}
+
+type S3Proxy struct {
+	masterKey string
+	signer    *v4.Signer
+
+	proxy   *cancelableProxy
+	proxyCA *x509.CertPool
+
+	sites map[string]site
 
 	ipExtractor *ipExtractor
 }
@@ -48,7 +53,7 @@ func NewS3Proxy(opts ...S3ProxyOptFunc) (s *S3Proxy, err error) {
 				signer.DisableURIPathEscaping = true
 			},
 		),
-		credentials: map[string]credential{},
+		sites: map[string]site{},
 	}
 	for _, opt := range opts {
 		if err := opt(s); err != nil {

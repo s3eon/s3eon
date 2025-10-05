@@ -12,6 +12,20 @@ import (
 )
 
 func (s *S3Proxy) authenticate(req *http.Request) (_ *http.Request, err error) {
+
+	site, ok := s.sites[req.Host]
+	if !ok {
+		if parts := strings.SplitN(req.Host, ".", 2); len(parts) == 2 {
+			site, ok = s.sites[req.Host]
+		}
+	}
+	if !ok {
+		site, ok = s.sites["*"]
+	}
+	if !ok {
+		return nil, fmt.Errorf("no matching host: %s", req.Host)
+	}
+
 	hAuthz := req.Header.Get("Authorization")
 	isHauthz := strings.HasPrefix(hAuthz, "AWS4-HMAC-SHA256 ")
 
@@ -26,21 +40,26 @@ func (s *S3Proxy) authenticate(req *http.Request) (_ *http.Request, err error) {
 		return nil, fmt.Errorf("both X-Amz-Signature and Authorization header present")
 
 	case isHauthz:
-		cred, err = s.validateAuthHeader(req, hAuthz)
+		cred, err = s.validateAuthHeader(req, site, hAuthz)
 	case isQAuthz:
-		cred, err = s.validateAuthQuery(req, qAuthz)
+		cred, err = s.validateAuthQuery(req, site, qAuthz)
 	}
 	if err != nil {
 		return
 	}
 
-	obj, err := parseS3Url(req.URL, s.downstreamURLStyle)
+	obj, err := parseS3Url(req.URL, site.downstreamURLStyle)
 	if err != nil {
 		return
 	}
 
 	req = req.WithContext(context.WithValue(req.Context(), contextKey{}, contextValue{
-		context:    req.Context(),
+		context: req.Context(),
+		upstream: upstreamInfo{
+			endpoint: *site.upstreamEndpoint,
+			region:   site.upstreamRegion,
+			style:    site.upstreamURLStyle,
+		},
 		credential: cred,
 		object:     obj,
 		action:     detectS3Action(req, obj.bucket, obj.key),
@@ -49,13 +68,13 @@ func (s *S3Proxy) authenticate(req *http.Request) (_ *http.Request, err error) {
 	return req, err
 }
 
-func (s *S3Proxy) validateAuthHeader(req *http.Request, authz string) (cred credential, err error) {
+func (s *S3Proxy) validateAuthHeader(req *http.Request, si site, authz string) (cred credential, err error) {
 	keyID, region, sig1, sigh, err := parseAuthorizationHeader(authz)
 	if err != nil {
 		return
 	}
 
-	cred, ok := s.credentials[keyID]
+	cred, ok := si.credentials[keyID]
 	if !ok {
 		return cred, fmt.Errorf("AccessKeyId mismatch")
 	}
@@ -158,13 +177,13 @@ func duplicateReq(req *http.Request, signedHeaders []string) *http.Request {
 	return &reqc
 }
 
-func (s *S3Proxy) validateAuthQuery(req *http.Request, authz string) (cred credential, err error) {
+func (s *S3Proxy) validateAuthQuery(req *http.Request, si site, authz string) (cred credential, err error) {
 	keyID, region, err := parseAWSCredential(req.URL.Query().Get("X-Amz-Credential"))
 	if err != nil {
 		return
 	}
 
-	cred, ok := s.credentials[keyID]
+	cred, ok := si.credentials[keyID]
 	if !ok {
 		return cred, fmt.Errorf("AccessKeyId mismatch")
 	}
@@ -225,7 +244,7 @@ func parseAmzDate(amzDate string) (time.Time, error) {
 func parseS3Url(u *url.URL, style S3URLStyle) (obj objectInfo, err error) {
 	if u.Path == "" || u.Path == "/" {
 		return objectInfo{
-			endpoint: u.Host,
+			hostname: u.Host,
 			bucket:   "",
 			key:      "",
 		}, nil
@@ -238,7 +257,7 @@ func parseS3Url(u *url.URL, style S3URLStyle) (obj objectInfo, err error) {
 			return obj, fmt.Errorf("invalid path: %q", u.Path)
 		}
 
-		obj.endpoint = u.Host
+		obj.hostname = u.Host
 		obj.bucket = parts[1]
 		obj.key = strings.Trim(parts[2], "/")
 
@@ -248,7 +267,7 @@ func parseS3Url(u *url.URL, style S3URLStyle) (obj objectInfo, err error) {
 			return obj, fmt.Errorf("invalid host: %q", u.Host)
 		}
 
-		obj.endpoint = parts[1]
+		obj.hostname = parts[1]
 		obj.bucket = parts[0]
 		obj.key = strings.Trim(u.Path, "/")
 	}

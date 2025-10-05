@@ -29,26 +29,26 @@ func (s *S3Proxy) rewrite(pr *httputil.ProxyRequest) (err error) {
 
 	// non-object request
 	if bucket == "" || key == "" {
-		pr.SetURL(s.upstreamEndpoint)
-		err = s.sign(pr, ctx.credential)
+		pr.SetURL(&ctx.upstream.endpoint)
+		err = s.sign(pr, ctx.upstream, ctx.credential)
 		if err != nil {
 			return cancelError{message: "failed to compute signature", err: err}
 		}
 		return
 	}
 
-	s.setUpstreamURL(pr, bucket, key)
+	s.setUpstreamURL(pr, ctx.upstream, ctx.object)
 
 	// no sse-c
 	if s.masterKey == "" {
-		err = s.sign(pr, ctx.credential)
+		err = s.sign(pr, ctx.upstream, ctx.credential)
 		if err != nil {
 			return cancelError{message: "failed to compute signature", err: err}
 		}
 		return
 	}
 
-	err = s.attachKey(pr.Out, "X-Amz-", bucket, key)
+	err = s.attachKey(pr.Out, ctx.upstream, ctx.object, "X-Amz-")
 	if err != nil {
 		return cancelError{message: "failed to attach sse-c key", err: err}
 	}
@@ -59,13 +59,17 @@ func (s *S3Proxy) rewrite(pr *httputil.ProxyRequest) (err error) {
 			return cancelError{code: http.StatusBadRequest, message: "invalid X-Amz-Copy-Source", err: err}
 		}
 
-		err = s.attachKey(pr.Out, "X-Amz-Copy-Source-", bucket, key)
+		obj := objectInfo{
+			bucket: bucket,
+			key:    key,
+		}
+		err = s.attachKey(pr.Out, ctx.upstream, obj, "X-Amz-Copy-Source-")
 		if err != nil {
 			return cancelError{message: "failed to attach sse-c key for copy source", err: err}
 		}
 	}
 
-	err = s.sign(pr, ctx.credential)
+	err = s.sign(pr, ctx.upstream, ctx.credential)
 	if err != nil {
 		return cancelError{message: "failed to compute signature", err: err}
 	}
@@ -73,13 +77,13 @@ func (s *S3Proxy) rewrite(pr *httputil.ProxyRequest) (err error) {
 	return nil
 }
 
-func (s *S3Proxy) sign(pr *httputil.ProxyRequest, cred credential) error {
+func (s *S3Proxy) sign(pr *httputil.ProxyRequest, upstream upstreamInfo, cred credential) error {
 	q := pr.In.URL.Query()
 	if sig := q.Get("X-Amz-Signature"); sig != "" {
 		q.Del("X-Amz-Signature")
 		pr.Out.URL.RawQuery = q.Encode()
 		exp, _ := strconv.ParseInt(q.Get("X-Amz-Expires"), 10, 64)
-		req := signer.PreSignV4(*pr.Out, cred.upstream.AccessKeyID, cred.upstream.SecretAccessKey, cred.upstream.SessionToken, s.upstreamRegion, exp)
+		req := signer.PreSignV4(*pr.Out, cred.upstream.AccessKeyID, cred.upstream.SecretAccessKey, cred.upstream.SessionToken, upstream.region, exp)
 		pr.Out.URL = req.URL
 		return nil
 	}
@@ -89,23 +93,23 @@ func (s *S3Proxy) sign(pr *httputil.ProxyRequest, cred credential) error {
 		pr.Out.Trailer = pr.In.Trailer
 		signer.StreamingSignV4(pr.Out,
 			cred.upstream.AccessKeyID, cred.upstream.SecretAccessKey, cred.upstream.SessionToken,
-			s.upstreamRegion, pr.In.ContentLength, t, newSHA256Hasher())
+			upstream.region, pr.In.ContentLength, t, newSHA256Hasher())
 		return nil
 	}
 
-	req := signer.SignV4(*pr.Out, cred.upstream.AccessKeyID, cred.upstream.SecretAccessKey, cred.upstream.SessionToken, s.upstreamRegion)
+	req := signer.SignV4(*pr.Out, cred.upstream.AccessKeyID, cred.upstream.SecretAccessKey, cred.upstream.SessionToken, upstream.region)
 	pr.Out.Header.Set("Authorization", req.Header.Get("Authorization"))
 	return nil
 }
 
-func (s *S3Proxy) setUpstreamURL(pr *httputil.ProxyRequest, bucket string, key string) {
-	scheme, host, path := s.upstreamEndpoint.Scheme, s.upstreamEndpoint.Host, ""
-	switch s.upstreamURLStyle {
+func (s *S3Proxy) setUpstreamURL(pr *httputil.ProxyRequest, upstream upstreamInfo, object objectInfo) {
+	scheme, host, path := upstream.endpoint.Scheme, upstream.endpoint.Host, ""
+	switch upstream.style {
 	case UrlStylePath:
-		path = "/" + bucket + "/" + key
+		path = "/" + object.bucket + "/" + object.key
 	case UrlStyleVirtualHosted:
-		host = bucket + "." + host
-		path = "/" + key
+		host = object.bucket + "." + host
+		path = "/" + object.key
 	}
 
 	pr.Out.URL.Scheme = scheme
@@ -115,9 +119,9 @@ func (s *S3Proxy) setUpstreamURL(pr *httputil.ProxyRequest, bucket string, key s
 	pr.Out.Host = ""
 }
 
-func (s *S3Proxy) attachKey(r *http.Request, headerPrefix, bucket, key string) error {
-	endpoint := s.upstreamEndpoint.Scheme + "://" + s.upstreamEndpoint.Host
-	keyB64, keyMD5, err := s.createSSECKey(endpoint, bucket, key)
+func (s *S3Proxy) attachKey(r *http.Request, upstream upstreamInfo, object objectInfo, headerPrefix string) error {
+	endpoint := upstream.endpoint.Scheme + "://" + upstream.endpoint.Host
+	keyB64, keyMD5, err := s.createSSECKey(endpoint, object.bucket, object.key)
 	if err != nil {
 		return fmt.Errorf("failed to create sse-c key: %w", err)
 	}
