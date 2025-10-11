@@ -2,14 +2,12 @@ package authz
 
 default result := false
 
-default allow := false
-
-default deny := false
-
 result if {
 	allow
 	not deny
 }
+
+default allow := false
 
 allow if count(object.get(input, "allow", [])) == 0
 
@@ -17,6 +15,8 @@ allow if {
 	some e in object.get(input, "allow", [])
 	match(e, input.request)
 }
+
+default deny := false
 
 deny if {
 	some e in object.get(input, "deny", [])
