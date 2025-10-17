@@ -72,10 +72,10 @@ func WithCredentialMap(downstream aws.Credentials, upstream aws.Credentials) S3P
 			si = site{}
 		}
 		if si.credentials == nil {
-			si.credentials = map[string]credential{}
+			si.credentials = map[string]Credential{}
 		}
 
-		si.credentials[downstream.AccessKeyID] = credential{downstream, upstream}
+		si.credentials[downstream.AccessKeyID] = Credential{downstream, upstream}
 		s.sites["*"] = si
 		return nil
 	}

@@ -2,6 +2,7 @@
 package s3proxy
 
 import (
+	"bytes"
 	"crypto/md5"
 	"encoding/base64"
 	"fmt"
@@ -20,35 +21,35 @@ import (
 )
 
 func (s *S3Proxy) rewrite(pr *httputil.ProxyRequest) (err error) {
-	ctx, ok := pr.In.Context().Value(contextKey{}).(contextValue)
+	ctx, ok := pr.In.Context().Value(contextKey{}).(Context)
 	if !ok {
 		return cancelError{code: http.StatusUnauthorized, message: "unauthorized"}
 	}
 
-	bucket, key := ctx.object.bucket, ctx.object.key
+	bucket, key := ctx.Object.Bucket, ctx.Object.Key
 
 	// non-object request
 	if bucket == "" || key == "" {
-		pr.SetURL(&ctx.upstream.endpoint)
-		err = s.sign(pr, ctx.upstream, ctx.credential)
+		pr.SetURL(&ctx.Upstream.Endpoint)
+		err = s.sign(pr, ctx)
 		if err != nil {
 			return cancelError{message: "failed to compute signature", err: err}
 		}
 		return
 	}
 
-	s.setUpstreamURL(pr, ctx.upstream, ctx.object)
+	s.setUpstreamURL(pr, ctx)
 
 	// no sse-c
 	if s.masterKey == "" {
-		err = s.sign(pr, ctx.upstream, ctx.credential)
+		err = s.sign(pr, ctx)
 		if err != nil {
 			return cancelError{message: "failed to compute signature", err: err}
 		}
 		return
 	}
 
-	err = s.attachKey(pr.Out, ctx.upstream, ctx.object, "X-Amz-")
+	err = s.attachKey(pr.Out, ctx, "X-Amz-")
 	if err != nil {
 		return cancelError{message: "failed to attach sse-c key", err: err}
 	}
@@ -59,17 +60,15 @@ func (s *S3Proxy) rewrite(pr *httputil.ProxyRequest) (err error) {
 			return cancelError{code: http.StatusBadRequest, message: "invalid X-Amz-Copy-Source", err: err}
 		}
 
-		obj := objectInfo{
-			bucket: bucket,
-			key:    key,
-		}
-		err = s.attachKey(pr.Out, ctx.upstream, obj, "X-Amz-Copy-Source-")
+		ctx := ctx
+		ctx.Object.Bucket, ctx.Object.Key = bucket, key
+		err = s.attachKey(pr.Out, ctx, "X-Amz-Copy-Source-")
 		if err != nil {
 			return cancelError{message: "failed to attach sse-c key for copy source", err: err}
 		}
 	}
 
-	err = s.sign(pr, ctx.upstream, ctx.credential)
+	err = s.sign(pr, ctx)
 	if err != nil {
 		return cancelError{message: "failed to compute signature", err: err}
 	}
@@ -77,13 +76,15 @@ func (s *S3Proxy) rewrite(pr *httputil.ProxyRequest) (err error) {
 	return nil
 }
 
-func (s *S3Proxy) sign(pr *httputil.ProxyRequest, upstream upstreamInfo, cred credential) error {
+func (s *S3Proxy) sign(pr *httputil.ProxyRequest, ctx Context) error {
 	q := pr.In.URL.Query()
 	if sig := q.Get("X-Amz-Signature"); sig != "" {
 		q.Del("X-Amz-Signature")
 		pr.Out.URL.RawQuery = q.Encode()
 		exp, _ := strconv.ParseInt(q.Get("X-Amz-Expires"), 10, 64)
-		req := signer.PreSignV4(*pr.Out, cred.upstream.AccessKeyID, cred.upstream.SecretAccessKey, cred.upstream.SessionToken, upstream.region, exp)
+		req := signer.PreSignV4(*pr.Out,
+			ctx.Credential.Upstream.AccessKeyID, ctx.Credential.Upstream.SecretAccessKey,
+			ctx.Credential.Upstream.SessionToken, ctx.Upstream.Region, exp)
 		pr.Out.URL = req.URL
 		return nil
 	}
@@ -92,24 +93,26 @@ func (s *S3Proxy) sign(pr *httputil.ProxyRequest, upstream upstreamInfo, cred cr
 		t, _ := parseAmzDateOrDate(pr.In.Header)
 		pr.Out.Trailer = pr.In.Trailer
 		signer.StreamingSignV4(pr.Out,
-			cred.upstream.AccessKeyID, cred.upstream.SecretAccessKey, cred.upstream.SessionToken,
-			upstream.region, pr.In.ContentLength, t, newSHA256Hasher())
+			ctx.Credential.Upstream.AccessKeyID, ctx.Credential.Upstream.SecretAccessKey,
+			ctx.Credential.Upstream.SessionToken, ctx.Upstream.Region, pr.In.ContentLength, t, newSHA256Hasher())
 		return nil
 	}
 
-	req := signer.SignV4(*pr.Out, cred.upstream.AccessKeyID, cred.upstream.SecretAccessKey, cred.upstream.SessionToken, upstream.region)
+	req := signer.SignV4(*pr.Out,
+		ctx.Credential.Upstream.AccessKeyID, ctx.Credential.Upstream.SecretAccessKey,
+		ctx.Credential.Upstream.SessionToken, ctx.Upstream.Region)
 	pr.Out.Header.Set("Authorization", req.Header.Get("Authorization"))
 	return nil
 }
 
-func (s *S3Proxy) setUpstreamURL(pr *httputil.ProxyRequest, upstream upstreamInfo, object objectInfo) {
-	scheme, host, path := upstream.endpoint.Scheme, upstream.endpoint.Host, ""
-	switch upstream.style {
+func (s *S3Proxy) setUpstreamURL(pr *httputil.ProxyRequest, ctx Context) {
+	scheme, host, path := ctx.Upstream.Endpoint.Scheme, ctx.Upstream.Endpoint.Host, ""
+	switch ctx.Upstream.Style {
 	case UrlStylePath:
-		path = "/" + object.bucket + "/" + object.key
+		path = "/" + ctx.Object.Bucket + "/" + ctx.Object.Key
 	case UrlStyleVirtualHosted:
-		host = object.bucket + "." + host
-		path = "/" + object.key
+		host = ctx.Object.Bucket + "." + host
+		path = "/" + ctx.Object.Key
 	}
 
 	pr.Out.URL.Scheme = scheme
@@ -119,9 +122,9 @@ func (s *S3Proxy) setUpstreamURL(pr *httputil.ProxyRequest, upstream upstreamInf
 	pr.Out.Host = ""
 }
 
-func (s *S3Proxy) attachKey(r *http.Request, upstream upstreamInfo, object objectInfo, headerPrefix string) error {
-	endpoint := upstream.endpoint.Scheme + "://" + upstream.endpoint.Host
-	keyB64, keyMD5, err := s.createSSECKey(endpoint, object.bucket, object.key)
+func (s *S3Proxy) attachKey(r *http.Request, ctx Context, headerPrefix string) error {
+
+	keyB64, keyMD5, err := s.createSSECKey(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to create sse-c key: %w", err)
 	}
@@ -132,8 +135,20 @@ func (s *S3Proxy) attachKey(r *http.Request, upstream upstreamInfo, object objec
 	return nil
 }
 
-func (s *S3Proxy) createSSECKey(endpoint, bucket, key string) (keyB64 string, keyMD5 string, err error) {
-	h := hkdf.New(sha256.New, []byte(s.masterKey), nil, []byte(endpoint+"/"+bucket+"/"+key))
+func (s *S3Proxy) createSSECKey(ctx Context) (keyB64 string, keyMD5 string, err error) {
+	var info []byte
+	switch ctx.hkdfInfo {
+	default:
+		var sb bytes.Buffer
+		if err := ctx.hkdfInfo.Execute(&sb, ctx); err != nil {
+			return "", "", fmt.Errorf("failed to render hkdf info: %w", err)
+		}
+		info = sb.Bytes()
+	case nil:
+		endpoint := ctx.Upstream.Endpoint.Scheme + "://" + ctx.Upstream.Endpoint.Host
+		info = []byte(endpoint + "/" + ctx.Object.Bucket + "/" + ctx.Object.Key)
+	}
+	h := hkdf.New(sha256.New, []byte(s.masterKey), nil, info)
 	k := make([]byte, 32)
 	if _, err := io.ReadFull(h, k); err != nil {
 		return "", "", fmt.Errorf("failed to generate sse-c key: %w", err)

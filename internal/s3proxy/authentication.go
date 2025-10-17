@@ -32,7 +32,7 @@ func (s *S3Proxy) authenticate(req *http.Request) (_ *http.Request, err error) {
 	qAuthz := req.URL.Query().Get("X-Amz-Signature")
 	isQAuthz := qAuthz != ""
 
-	var cred credential
+	var cred Credential
 	switch {
 	default:
 		return nil, fmt.Errorf("no X-Amz-Signature or Authorization header present")
@@ -53,22 +53,22 @@ func (s *S3Proxy) authenticate(req *http.Request) (_ *http.Request, err error) {
 		return
 	}
 
-	req = req.WithContext(context.WithValue(req.Context(), contextKey{}, contextValue{
+	req = req.WithContext(context.WithValue(req.Context(), contextKey{}, Context{
 		context: req.Context(),
-		upstream: upstreamInfo{
-			endpoint: *site.upstreamEndpoint,
-			region:   site.upstreamRegion,
-			style:    site.upstreamURLStyle,
+		Upstream: UpstreamInfo{
+			Endpoint: *site.upstreamEndpoint,
+			Region:   site.upstreamRegion,
+			Style:    site.upstreamURLStyle,
 		},
-		credential: cred,
-		object:     obj,
-		action:     detectS3Action(req, obj.bucket, obj.key),
-		sourceIP:   s.ipExtractor.ExtractClientIP(req),
+		Credential: cred,
+		Object:     obj,
+		Action:     detectS3Action(req, obj.Bucket, obj.Key),
+		SourceIP:   s.ipExtractor.ExtractClientIP(req),
 	}))
 	return req, err
 }
 
-func (s *S3Proxy) validateAuthHeader(req *http.Request, si site, authz string) (cred credential, err error) {
+func (s *S3Proxy) validateAuthHeader(req *http.Request, si site, authz string) (cred Credential, err error) {
 	keyID, region, sig1, sigh, err := parseAuthorizationHeader(authz)
 	if err != nil {
 		return
@@ -87,7 +87,7 @@ func (s *S3Proxy) validateAuthHeader(req *http.Request, si site, authz string) (
 	bodyHash := req.Header.Get("x-amz-content-sha256")
 
 	reqc := duplicateReq(req, sigh)
-	err = s.signer.SignHTTP(req.Context(), cred.downstream, reqc, bodyHash, "s3", region, sigt)
+	err = s.signer.SignHTTP(req.Context(), cred.Downstream, reqc, bodyHash, "s3", region, sigt)
 	if err != nil {
 		return cred, fmt.Errorf("failed to compute signature: %w", err)
 	}
@@ -101,7 +101,7 @@ func (s *S3Proxy) validateAuthHeader(req *http.Request, si site, authz string) (
 	}
 
 	if strings.HasPrefix(bodyHash, "STREAMING-AWS4-HMAC-SHA256-PAYLOAD") {
-		req.Body = NewAWSChunkedReader(req, cred.downstream, sig1, region, sigt)
+		req.Body = NewAWSChunkedReader(req, cred.Downstream, sig1, region, sigt)
 		req.ContentLength, _ = strconv.ParseInt(req.Header.Get("x-amz-decoded-content-length"), 10, 64)
 		req.Header.Del("content-length")
 	}
@@ -177,7 +177,7 @@ func duplicateReq(req *http.Request, signedHeaders []string) *http.Request {
 	return &reqc
 }
 
-func (s *S3Proxy) validateAuthQuery(req *http.Request, si site, authz string) (cred credential, err error) {
+func (s *S3Proxy) validateAuthQuery(req *http.Request, si site, authz string) (cred Credential, err error) {
 	keyID, region, err := parseAWSCredential(req.URL.Query().Get("X-Amz-Credential"))
 	if err != nil {
 		return
@@ -196,7 +196,7 @@ func (s *S3Proxy) validateAuthQuery(req *http.Request, si site, authz string) (c
 	bodyHash := req.Header.Get("X-Amz-Content-Sha256")
 	reqc := duplicateReq(req, strings.Split(req.URL.Query().Get("X-Amz-SignedHeaders"), ";"))
 
-	sigu, _, err := s.signer.PresignHTTP(context.Background(), cred.downstream, reqc, bodyHash, "s3", region, t)
+	sigu, _, err := s.signer.PresignHTTP(context.Background(), cred.Downstream, reqc, bodyHash, "s3", region, t)
 	if err != nil {
 		return cred, fmt.Errorf("failed to compute signature: %w", err)
 	}
@@ -241,12 +241,12 @@ func parseAmzDate(amzDate string) (time.Time, error) {
 	return t, nil
 }
 
-func parseS3Url(u *url.URL, style S3URLStyle) (obj objectInfo, err error) {
+func parseS3Url(u *url.URL, style S3URLStyle) (obj ObjectInfo, err error) {
 	if u.Path == "" || u.Path == "/" {
-		return objectInfo{
-			hostname: u.Host,
-			bucket:   "",
-			key:      "",
+		return ObjectInfo{
+			Hostname: u.Host,
+			Bucket:   "",
+			Key:      "",
 		}, nil
 	}
 
@@ -257,9 +257,9 @@ func parseS3Url(u *url.URL, style S3URLStyle) (obj objectInfo, err error) {
 			return obj, fmt.Errorf("invalid path: %q", u.Path)
 		}
 
-		obj.hostname = u.Host
-		obj.bucket = parts[1]
-		obj.key = strings.Trim(parts[2], "/")
+		obj.Hostname = u.Host
+		obj.Bucket = parts[1]
+		obj.Key = strings.Trim(parts[2], "/")
 
 	case UrlStyleVirtualHosted:
 		parts := strings.SplitN(u.Host, ".", 2)
@@ -267,9 +267,9 @@ func parseS3Url(u *url.URL, style S3URLStyle) (obj objectInfo, err error) {
 			return obj, fmt.Errorf("invalid host: %q", u.Host)
 		}
 
-		obj.hostname = parts[1]
-		obj.bucket = parts[0]
-		obj.key = strings.Trim(u.Path, "/")
+		obj.Hostname = parts[1]
+		obj.Bucket = parts[0]
+		obj.Key = strings.Trim(u.Path, "/")
 	}
 	return
 }

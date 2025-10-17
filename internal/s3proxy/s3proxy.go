@@ -29,7 +29,7 @@ type site struct {
 	upstreamEndpoint *url.URL
 	upstreamRegion   string
 
-	credentials map[string]credential
+	credentials map[string]Credential
 }
 
 type S3Proxy struct {
