@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"text/template"
 
 	v4 "github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 )
@@ -30,6 +31,8 @@ type site struct {
 	upstreamRegion   string
 
 	credentials map[string]Credential
+
+	hkdfInfo *template.Template
 }
 
 type S3Proxy struct {

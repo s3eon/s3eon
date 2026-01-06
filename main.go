@@ -26,6 +26,8 @@ var (
 	upstreamEndpoint string
 	upstreamRegion   string
 	upstreamCAFile   string
+
+	hkdfInfoTemplate string
 )
 
 func init() {
@@ -44,6 +46,7 @@ func init() {
 	flag.StringVar(&upstreamCAFile, "upstream-ca-file", getEnvOrDefault("S3EON_UPSTREAM_CA_FILE", ""), "Additional CA certificates for upstream S3")
 	flag.IntVar(&upstreamUrlStyle, "upstream-url-style", toIntOrDefault(os.Getenv("S3EON_UPSTREAM_URL_STYLE"), 1), "Upstream S3 URL style (0=path, 1=virtual host)")
 
+	flag.StringVar(&hkdfInfoTemplate, "hkdf-info-template", getEnvOrDefault("S3EON_HKDF_INFO_TEMPLATE", ""), "Template for hkdf info to derive per-object SSE-C keys")
 }
 
 func getEnvOrDefault(key, defaultValue string) string {
@@ -91,6 +94,9 @@ func main() {
 	}
 	if upstreamCAFile != "" {
 		opts = append(opts, s3proxy.WithAdditionalCACert(upstreamCAFile))
+	}
+	if hkdfInfoTemplate != "" {
+		opts = append(opts, s3proxy.WithHKDFInfoTemplate(hkdfInfoTemplate))
 	}
 	s3Proxy, err := s3proxy.NewS3Proxy(opts...)
 	if err != nil {

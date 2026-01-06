@@ -64,6 +64,7 @@ func (s *S3Proxy) authenticate(req *http.Request) (_ *http.Request, err error) {
 		Object:     obj,
 		Action:     detectS3Action(req, obj.Bucket, obj.Key),
 		SourceIP:   s.ipExtractor.ExtractClientIP(req),
+		hkdfInfo:   site.hkdfInfo,
 	}))
 	return req, err
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"text/template"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 )
@@ -78,5 +79,22 @@ func WithCredentialMap(downstream aws.Credentials, upstream aws.Credentials) S3P
 		si.credentials[downstream.AccessKeyID] = Credential{downstream, upstream}
 		s.sites["*"] = si
 		return nil
+	}
+}
+
+func WithHKDFInfoTemplate(tmpl string) S3ProxyOptFunc {
+	return func(s *S3Proxy) (err error) {
+		if tmpl == "" {
+			return
+		}
+
+		si, ok := s.sites["*"]
+		if !ok {
+			si = site{}
+		}
+
+		si.hkdfInfo, err = template.New("hkdf").Parse(tmpl)
+		s.sites["*"] = si
+		return
 	}
 }

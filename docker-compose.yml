@@ -4,7 +4,7 @@ services:
   s3eon:
     build: .
     restart: unless-stopped
-    depends_on: 
+    depends_on:
       certificate:
         condition: service_completed_successfully
     environment:
@@ -19,6 +19,7 @@ services:
       S3EON_UPSTREAM_REGION: ${S3EON_UPSTREAM_REGION:-us-east-1}
       S3EON_UPSTREAM_CA_FILE: ${S3EON_UPSTREAM_CA_FILE:-/app/certs/CAs/ca.crt}
       S3EON_UPSTREAM_URL_STYLE: ${S3EON_UPSTREAM_URL_STYLE:-0}
+      S3EON_HKDF_INFO_TEMPLATE: ${S3EON_HKDF_INFO_TEMPLATE:-}
     volumes:
       - ./.certs:/app/certs
     ports:
@@ -26,7 +27,7 @@ services:
       - "8081:8081" # S3manager
       - "9000:9000" # minio S3 API 
       - "9001:9001" # minio Console UI 
-  
+
   browser:
     image: cloudlena/s3manager
     restart: unless-stopped
@@ -38,20 +39,20 @@ services:
       SECRET_ACCESS_KEY: ${S3EON_DOWNSTREAM_SECRET_ACCESS_KEY:-password}
       USE_SSL: false
       PORT: 8081
-  
-  minio: 
-    image: minio/minio:latest 
+
+  minio:
+    image: minio/minio:latest
     network_mode: "service:s3eon"
-    depends_on: 
+    depends_on:
       certificate:
         condition: service_completed_successfully
     restart: unless-stopped
-    environment: 
+    environment:
       MINIO_ROOT_USER: ${S3EON_UPSTREAM_ACCESS_KEY_ID:-admin}
       MINIO_ROOT_PASSWORD: ${S3EON_UPSTREAM_SECRET_ACCESS_KEY:-dkp5dx4vgh9jv92n}
-    command: server /data --console-address ":9001" 
-    volumes: 
-      - minio:/data 
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio:/data
       - ./.certs:/root/.minio/certs
 
   minio-bucket:
@@ -62,25 +63,24 @@ services:
       MINIO_ROOT_PASSWORD: ${S3EON_UPSTREAM_SECRET_ACCESS_KEY:-dkp5dx4vgh9jv92n}
       MC_INSECURE: "true"
     entrypoint:
-      - /bin/sh 
+      - /bin/sh
       - -c
     command:
       - |
-          until mc alias set local https://localhost:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD; do
-            echo 'Waiting for MinIO...'
-            sleep 2
-          done
-          mc mb local/my-bucket || true
-
+        until mc alias set local https://localhost:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD; do
+          echo 'Waiting for MinIO...'
+          sleep 2
+        done
+        mc mb local/my-bucket || true
 
   certificate:
     image: alpine/mkcert
     restart: on-failure
-    volumes: 
+    volumes:
       - ./.certs:/certs
     working_dir: /certs
-    entrypoint: [/bin/sh, -c]
-    command: 
+    entrypoint: [ /bin/sh, -c ]
+    command:
       - |
         if [ ! -f 'public.crt' ] || [ ! -f 'private.key' ]; then
           mkcert -key-file private.key -cert-file public.crt localhost
